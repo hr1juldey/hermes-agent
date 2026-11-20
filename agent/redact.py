@@ -1804,12 +1804,13 @@ def redact_for_egress(text: str, *, urls: bool = False, keep_phone_numbers: bool
 
 def redact_terminal_output(output: str, command: str | None = None, *, force: bool = False) -> str:
     """Single redaction policy for ALL terminal-output surfaces: the ENV/YAML-assignment
-    pass runs only when ``command`` is an env dump or reads a secret-bearing file (``.env``,
-    shell rc, a credential store like ``.netrc``, Hermes ``config.yaml``); otherwise
-    code_file=True avoids false positives on source/config dumps."""
+    pass runs when ``command`` is an env dump, reads a secret-bearing file (``.env``, shell
+    rc, a credential store), or the OUTPUT itself is credential-shaped (``python -c``/``jq``
+    still print stores — #157915); otherwise code_file=True avoids false positives on dumps."""
     if not output:
         return output
-    secret_file = _command_reads_secret_file(command)
+    from agent.redact_output_gate import output_is_credential_dump
+    secret_file = _command_reads_secret_file(command) or output_is_credential_dump(output)
     code_file = not (secret_file or is_env_dump_command(command))
     redacted = redact_sensitive_text(output, force=force, code_file=code_file, secret_file=secret_file)
     # Source-preserving output still gets the Python-repr pass on high-confidence
