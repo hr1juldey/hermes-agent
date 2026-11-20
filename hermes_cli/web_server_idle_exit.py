@@ -103,8 +103,10 @@ def _session_work_in_flight(session: dict) -> bool:
 
 def busy_ledger() -> Optional[str]:
     """Name the ledger that holds work — ``"retirement_admission"``, ``"session:<id>"``,
-    ``"delegation"``, ``"cron:<job ids>"`` — ``""`` when every ledger is empty, ``None`` when one
-    cannot be read. The Desktop's idle probe reports this so a backend that will not retire says
+    ``"delegation"``, ``"cron:<job ids>"``, ``"process"`` for background processes/watchers from
+    ``tools.process_registry`` (the same ledger gateway shutdown drains, #158160) — ``""`` when
+    every ledger is empty, ``None`` when one cannot be read. The Desktop's idle probe reports this
+    so a backend that will not retire says
     WHICH work it is protecting, instead of an opaque "turn in flight".
 
     Session work lives on ``tui_gateway.server`` (the voice mixin's helper is bound into that
@@ -125,8 +127,11 @@ def busy_ledger() -> Optional[str]:
             return "session:" + ",".join(str(sid) for sid in busy_sessions)
         from tools.async_delegation import active_count
         from cron.scheduler import get_running_job_ids
+        from tools.process_registry import process_registry
         if active_count():
             return "delegation"
+        if process_registry.has_any_active() or process_registry.pending_watchers:
+            return "process"
         running_jobs = get_running_job_ids()
         return "cron:" + ",".join(sorted(running_jobs)) if running_jobs else ""
     except Exception:

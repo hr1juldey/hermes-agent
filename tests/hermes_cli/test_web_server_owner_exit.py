@@ -102,3 +102,31 @@ def test_lock_written_by_the_windows_ssh_runtime_lets_the_superseded_backend_ret
     # The same valid lock makes the backend lock-owned, so `hermes update`'s restart_managed sweep
     # leaves it to the code-skew watchdog instead of terminating it, as on POSIX.
     assert desktop_record["pid"] in _lock_owned_serve_pids(lock_path.parent.parent)
+
+
+def _run_with_ledger(fence, nonces, monkeypatch, ledger):
+    """The _run harness with busy_ledger pinned, for #158160's supersede busy gate."""
+    monkeypatch.setattr("hermes_cli.web_server_idle_exit.busy_ledger", lambda: ledger)
+    return _run(fence, nonces)
+
+
+def test_supersede_deferred_while_background_process_runs(monkeypatch):
+    """#158160: a supersede lock must not retire the backend while notify_on_complete background
+    processes still run — their completion notices would silently die."""
+    idle = _Fence(idle=True)
+    assert _run_with_ledger(idle, [NEW, NEW, NEW], monkeypatch, "process").should_exit is False
+    assert idle.committed is False
+
+
+def test_supersede_deferred_when_busy_probe_fails(monkeypatch):
+    """busy_ledger() returns None when a probe cannot be read; None is falsy, so the gate must
+    compare against '' — a failed probe keeps the backend up (fail closed), never retires it."""
+    idle = _Fence(idle=True)
+    assert _run_with_ledger(idle, [NEW, NEW, NEW], monkeypatch, None).should_exit is False
+    assert idle.committed is False
+
+
+def test_supersede_retires_when_idle(monkeypatch):
+    idle = _Fence(idle=True)
+    assert _run_with_ledger(idle, [NEW, NEW], monkeypatch, "").should_exit is True
+    assert idle.committed is True  # admission closed before exit, as before #158160

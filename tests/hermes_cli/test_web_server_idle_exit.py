@@ -96,3 +96,54 @@ def test_turn_probe_counts_in_flight_cron_execution():
     finally:
         with scheduler._running_lock:
             scheduler._running_job_ids.discard("idle-exit-probe-job")
+
+
+class _FakeRegistry:
+    def __init__(self, active=(), watchers=()):
+        self._active = list(active)
+        self.pending_watchers = list(watchers)
+
+    def has_any_active(self):
+        return bool(self._active)
+
+
+def _stub_idle_ledgers(monkeypatch):
+    """#158160: silence every ledger busy_ledger() consults so only the process registry moves."""
+    import tui_gateway.server as gateway
+    import tools.async_delegation as delegation
+    from cron import scheduler
+    from tools import process_registry
+    from hermes_cli import backend_retirement
+
+    monkeypatch.setattr(gateway, "_sessions", {})
+    monkeypatch.setattr(backend_retirement.retirement, "active_count", lambda: 0)
+    monkeypatch.setattr(delegation, "active_count", lambda: 0)
+    monkeypatch.setattr(scheduler, "get_running_job_ids", list)
+    monkeypatch.setattr(process_registry, "process_registry", _FakeRegistry())
+
+
+def test_busy_ledger_reports_live_background_process(monkeypatch):
+    """#158160: a notify_on_complete background process must hold the idle exit, exactly as the
+    gateway shutdown drain already treats it (run_shutdown._processes_active)."""
+    from tools import process_registry
+    from hermes_cli.web_server_idle_exit import busy_ledger
+
+    _stub_idle_ledgers(monkeypatch)
+    monkeypatch.setattr(process_registry, "process_registry", _FakeRegistry(active=["p1"]))
+    assert busy_ledger() == "process"
+
+
+def test_busy_ledger_reports_pending_watcher(monkeypatch):
+    from tools import process_registry
+    from hermes_cli.web_server_idle_exit import busy_ledger
+
+    _stub_idle_ledgers(monkeypatch)
+    monkeypatch.setattr(process_registry, "process_registry", _FakeRegistry(watchers=[{"id": "w1"}]))
+    assert busy_ledger() == "process"
+
+
+def test_busy_ledger_empty_when_registry_idle(monkeypatch):
+    from hermes_cli.web_server_idle_exit import busy_ledger
+
+    _stub_idle_ledgers(monkeypatch)
+    assert busy_ledger() == ""

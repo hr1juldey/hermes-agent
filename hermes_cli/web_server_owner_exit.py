@@ -51,6 +51,10 @@ def start_owner_watchdog(server, *, lock_path: Path, nonce: str,
         lock = reader(lock_path)
         if lock is None or not should_retire_superseded(lock=lock, my_nonce=nonce, age_s=now() - started):
             return None
+        from hermes_cli.web_server_idle_exit import busy_ledger
+        ledger = busy_ledger()
+        if ledger != "":  # live work (non-empty) or unreadable probe (None) both keep the backend alive
+            return None
         return f"SSH-isolated backend {nonce} was superseded by spawn {lock['spawnNonce']}; retiring."
 
     return _run_retirement_watchdog(server, observe=_observe, fence=fence, poll_s=poll_s,
